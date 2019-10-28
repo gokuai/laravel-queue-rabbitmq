@@ -3,6 +3,7 @@
 namespace VladimirYuldashev\LaravelQueueRabbitMQ\Queue;
 
 use DateTime;
+use RuntimeException;
 use ErrorException;
 use Exception;
 use Log;
@@ -168,11 +169,33 @@ class RabbitMQQueue extends Queue implements QueueContract
             if ($message instanceof AMQPMessage) {
                 return new RabbitMQJob($this->container, $this, $this->channel, $queue, $message);
             }
+        } catch (RuntimeException $exception) {
+            if (strpos($exception->getMessage(), 'Broken pipe') !== false) {
+                $this->reportConnectionError('pop', $exception);
+                try {
+                    $this->reconnect();
+                } catch (Exception $e) {
+                }
+            } else {
+                throw $exception;
+            }
         } catch (ErrorException $exception) {
             $this->reportConnectionError('pop', $exception);
+            if (strpos($exception->getMessage(), 'Broken pipe') !== false) {
+                try {
+                    $this->reconnect();
+                } catch (Exception $e) {
+                }
+            }
         }
 
         return null;
+    }
+
+    private function reconnect()
+    {
+        $this->connection->reconnect();
+        $this->channel = $this->getChannel();
     }
 
     /**
